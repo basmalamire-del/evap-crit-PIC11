@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+venv/
+.venv/
+
+# Exports / figures générés
+exports/
+figures/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
