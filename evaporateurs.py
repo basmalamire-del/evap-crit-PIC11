@@ -1,122 +1,95 @@
 # evaporateurs.py
 import numpy as np
-from thermodynamique import lmtd, U_global, Tsat_from_Pbar, lambda_vapeur, bpe_sucre
+from thermodynamique import Tsat_water_from_Pbar, latent_heat_kJkg, LMTD, to_float
 
-# --------- Helpers robustes ---------
-def _as_array(x):
-    return np.asarray(x)
-
-def _to_scalar(x, default=0.0):
-    a = _as_array(x)
-    if a.size == 0:
-        return float(default)
-    if a.size == 1:
-        return float(a.ravel()[0])
-    return float(np.mean(a))
-
-
-class EvaporateurMultiple:
+def simuler_evaporation_multi_effets(
+    n_effets: int,
+    F_kg_h: float,
+    xF: float,
+    xout: float,
+    T_feed_C: float,
+    P_vapeur_bar: float,
+    U_W_m2K: float = 1800.0,
+    T_last_C: float = 60.0
+):
     """
-    Batterie d'évaporateurs multiples (modèle PIC stable pour dashboard).
-    Entrées:
-        F (kg/h), xF, xout, Tfeed (°C), Psteam (bar), n_effets
-    Sorties:
-        dict avec S, E, A_totale + profils par effet (L, V, x, A, T, Tsat, ...)
+    Simulation simplifiée mais robuste d'une batterie multi-effets.
+    Retour dict avec grandeurs scalaires + profils par effet.
+
+    Hypothèses:
+    - Bilan matière: soluté conservé, xout imposé
+    - V_total = F - L
+    - Economie ~ n_effets * 0.95 (valeur typique, stable)
+    - Répartition de ΔT total sur effets de manière uniforme
+    - Surface estimée via Q = V*lambda ≈ U*A*ΔT_lm
     """
+    n = int(max(n_effets, 1))
 
-    def __init__(self, F, xF, xout, Tfeed, Psteam, n_effets=3):
-        self.F = float(F)
-        self.xF = float(xF)
-        self.xout = float(xout)
-        self.Tfeed = float(Tfeed)
-        self.Psteam = float(Psteam)
-        self.n = int(n_effets)
+    F = to_float(F_kg_h, 1.0)
+    xF = float(max(min(xF, 0.95), 1e-6))
+    xout = float(max(min(xout, 0.95), xF + 1e-6))
+    Tfeed = to_float(T_feed_C, 25.0)
+    Psteam = to_float(P_vapeur_bar, 2.0)
 
-        if not (0 < self.xF < 1) or not (0 < self.xout < 1):
-            raise ValueError("xF et xout doivent être entre 0 et 1.")
-        if self.xout <= self.xF:
-            raise ValueError("xout doit être > xF (concentration augmente).")
-        if self.n < 1:
-            raise ValueError("n_effets >= 1")
+    # Produit liquide final (L) via conservation du soluté
+    solute = F * xF
+    L_final = solute / xout
+    V_total = max(F - L_final, 0.0)
 
-    def simuler(self):
-        # --- Bilan matière global ---
-        solute = self.F * self.xF
-        L_final = solute / self.xout
-        V_tot = self.F - L_final  # eau évaporée totale (kg/h)
+    # Economie (kg évaporé / kg vapeur)
+    economie = max(0.8, 0.95 * n)
+    S_steam = V_total / economie  # kg/h vapeur motrice
 
-        # --- Répartition simple par effet (stable) ---
-        # On répartit l’évaporation uniformément (tu peux adapter si ton guide impose autre chose)
-        V = np.full(self.n, V_tot / self.n, dtype=float)
+    # Températures
+    T_steam = Tsat_water_from_Pbar(Psteam)
+    T_last = min(to_float(T_last_C, 60.0), T_steam - 5.0)
 
-        # Débits liquides par effet
-        L = np.zeros(self.n + 1, dtype=float)
-        x = np.zeros(self.n + 1, dtype=float)
-        L[0] = self.F
-        x[0] = self.xF
+    dT_total = max(T_steam - T_last, 10.0)
+    dT_eff = dT_total / n
 
-        for i in range(self.n):
-            L[i + 1] = L[i] - V[i]
-            L[i + 1] = max(L[i + 1], 1e-6)
-            x[i + 1] = solute / L[i + 1]
+    T_cond = [T_steam - i * dT_eff for i in range(n)]
+    T_boil = [T_steam - (i + 1) * dT_eff for i in range(n)]
 
-        # --- Profils thermiques ---
-        # Vapeur motrice (effet 1)
-        Tsteam = Tsat_from_Pbar(self.Psteam)
+    # Répartition d’évaporation par effet (simple)
+    V_i = np.full(n, V_total / n, dtype=float)
 
-        # On suppose une chute de température totale disponible
-        # (valeur typique, ajustable)
-        T_last = 60.0  # °C, condenseur/dernier effet
-        dT_total = max(Tsteam - T_last, 10.0)
-        dT_eff = dT_total / self.n
+    # Débits liquides par effet
+    L_i = np.zeros(n, dtype=float)
+    L_i[0] = F - V_i[0]
+    for i in range(1, n):
+        L_i[i] = L_i[i - 1] - V_i[i]
 
-        T_boil = np.zeros(self.n, dtype=float)
-        Tsat = np.zeros(self.n, dtype=float)
-        for i in range(self.n):
-            Tsat[i] = Tsteam - (i + 1) * dT_eff
-            # BPE sucre
-            T_boil[i] = Tsat[i] + bpe_sucre(x[i + 1])
+    # Concentrations par effet
+    x_i = np.zeros(n, dtype=float)
+    for i in range(n):
+        denom = max(L_i[i], 1e-9)
+        x_i[i] = solute / denom
 
-        # --- Surfaces d'échange ---
-        U = U_global("standard")
-        A = np.zeros(self.n, dtype=float)
+    # Surface (estimation)
+    # Q_i ≈ V_i * lambda(T_boil)
+    # lambda en kJ/kg -> W*h/kg = (kJ/kg)*(1000J/kJ) / 3600
+    A_i = np.zeros(n, dtype=float)
+    for i in range(n):
+        lam_kJkg = latent_heat_kJkg(T_boil[i])
+        Q_Wh = V_i[i] * (lam_kJkg * 1000.0 / 3600.0)  # W*h
+        # ΔT_lm ~ dT_eff (stable)
+        dTlm = max(dT_eff, 1.0)
+        # A = Q / (U*ΔT) ; Q en W*h → convert vers W en divisant par 1h (donc identique)
+        A_i[i] = max(Q_Wh / (U_W_m2K * dTlm), 0.0)
 
-        # Hypothèse : chaleur = V[i] * lambda (approx)
-        for i in range(self.n):
-            lam = lambda_vapeur(Tsat[i])  # J/kg
-            Q = V[i] * lam / 3600.0  # W (car V en kg/h)
-
-            # ΔT1/ΔT2 (robuste)
-            # côté chaud: Tsat[i] (condensation), côté froid: T_boil[i]
-            dT1 = Tsat[i] - T_boil[i]
-            dT2 = Tsat[i] - (T_boil[i] - 2.0)  # petit écart pour éviter dT1==dT2
-            DTlm = lmtd(dT1, dT2)
-
-            if DTlm <= 0:
-                A[i] = 0.0
-            else:
-                A[i] = Q / (U * DTlm)
-
-        A_totale = float(np.sum(A))
-
-        # --- Consommation vapeur S et économie ---
-        # Modèle simple: consommation vapeur ~ évaporation 1er effet
-        # (si ton guide impose autre chose, remplace seulement ce bloc)
-        S = float(V[0])
-        E = float(V_tot / max(S, 1e-9))
-
-        # Résultats
-        res = {
-            "S": S,
-            "E": E,
-            "A_totale": A_totale,
-            "V_tot": float(V_tot),
-            "L": L,              # taille n+1
-            "V": V,              # taille n
-            "x": x,              # taille n+1
-            "A": A,              # taille n
-            "Tsteam": float(Tsteam),
-            "Tsat": Tsat,        # taille n
-            "T_boil": T_boil,    # taille n
-        }
-        return res
+    res = {
+        "S": float(S_steam),
+        "economie": float(economie),
+        "A_total": float(np.sum(A_i)),
+        "V_total": float(V_total),
+        "L_final": float(L_final),
+        "T_steam": float(T_steam),
+        "effets": np.arange(1, n + 1, dtype=int),
+        "V_i": V_i,
+        "L_i": L_i,
+        "x_i": x_i,
+        "T_boil": np.array(T_boil, dtype=float),
+        "T_cond": np.array(T_cond, dtype=float),
+        "A_i": A_i,
+    }
+    return res

@@ -1,16 +1,28 @@
 # cristallisation.py
 import numpy as np
 
+# -----------------------------
+# Outils numeriques robustes
+# (compatibles numpy 1.x et 2.x)
+# -----------------------------
+def trapz_robuste(y, x):
+    """
+    Intégration trapèzes sans dépendre de np.trapz / np.trapezoid
+    Compatible partout (numpy 1.x / 2.x).
+    """
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    if y.size < 2:
+        return 0.0
+    dx = np.diff(x)
+    return float(np.sum(0.5 * (y[:-1] + y[1:]) * dx))
+
 
 # -----------------------------
-# Propriétés thermodynamiques
+# Modèle cristallisation (batch)
 # -----------------------------
 def solubilite(T):
-    """
-    Solubilité du saccharose
-    T en °C
-    Retour : Cs en g / 100 g solution
-    """
+    # T en °C, retourne C* (g / 100 g solution) - corrélation donnée
     return 64.18 + 0.1337 * T + 5.52e-3 * T**2 - 9.73e-6 * T**3
 
 
@@ -18,14 +30,11 @@ def sursaturation(C, Cs):
     return max((C - Cs) / Cs, 0.0)
 
 
-# -----------------------------
-# Cinétiques
-# -----------------------------
 def nucleation(S, mT):
     kb = 1.5e10
     b = 2.5
     j = 0.5
-    return kb * (S ** b) * max(mT, 1e-12) ** j
+    return kb * (S**b) * max(mT, 1e-12) ** j
 
 
 def croissance(S, T):
@@ -33,47 +42,28 @@ def croissance(S, T):
     g = 1.5
     R = 8.314
     Eg = 45000
-    return kg * (S ** g) * np.exp(-Eg / (R * (T + 273.15)))
+    return kg * (S**g) * np.exp(-Eg / (R * (T + 273.15)))
 
 
-# -----------------------------
-# Moments de la population
-# -----------------------------
 def moments(L, n):
-    m0 = np.trapz(n, L)
-    m1 = np.trapz(L * n, L)
-    m2 = np.trapz(L * L * n, L)
+    m0 = trapz_robuste(n, L)
+    m1 = trapz_robuste(L * n, L)
+    m2 = trapz_robuste((L**2) * n, L)
 
     if m0 <= 0:
         return 0.0, 0.0
 
     Lmean = m1 / m0
-    variance = max(m2 / m0 - Lmean**2, 0.0)
-    CV = np.sqrt(variance) / Lmean if Lmean > 0 else 0.0
-
+    var = max(m2 / m0 - Lmean**2, 0.0)
+    CV = np.sqrt(var) / Lmean if Lmean > 0 else 0.0
     return float(Lmean), float(CV)
 
 
-# -----------------------------
-# Simulation batch
-# -----------------------------
-def simuler_cristallisation_batch(
-    M,
-    C_init,
-    T_init,
-    duree,
-    dt=60.0,
-    profil="lineaire"
-):
+def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lineaire"):
     """
-    Simulation d'un cristalliseur batch
-
-    Retourne :
-    - L : tailles de cristaux
-    - n : densité de population
-    - hist : historique temporel
+    Retourne : L, n(L), hist
+    hist contient : t, T, S, C, Cs, Lmean, CV
     """
-
     N = 80
     L = np.linspace(0.0, 8e-4, N)
     dL = L[1] - L[0]
@@ -82,43 +72,35 @@ def simuler_cristallisation_batch(
     T = float(T_init)
     C = float(C_init)
 
-    tvec = np.arange(0, duree + dt, dt)
+    tvec = np.arange(0.0, float(duree) + float(dt), float(dt))
 
-    hist = {
-        "t": [],
-        "T": [],
-        "S": [],
-        "C": [],
-        "Cs": [],
-        "Lmean": [],
-        "CV": []
-    }
+    hist = {"t": [], "T": [], "S": [], "C": [], "Cs": [], "Lmean": [], "CV": []}
 
     for t in tvec:
-        Cs = solubilite(T)
-        S = sursaturation(C, Cs)
+        Cs = float(solubilite(T))
+        S = float(sursaturation(C, Cs))
 
-        mT = np.trapz((L**3) * n, L)
-        B = nucleation(S, mT)
-        G = croissance(S, T)
+        mT = trapz_robuste((L**3) * n, L)
+        B = float(nucleation(S, mT))
+        G = float(croissance(S, T))
 
-        # Transport de population (upwind)
-        if G > 0:
+        # Transport (upwind) - robuste
+        if G > 0.0:
             n_new = np.copy(n)
             for i in range(1, N):
                 n_new[i] = n[i] - dt * G * (n[i] - n[i - 1]) / dL
             n_new[0] = B / max(G, 1e-12)
             n = np.maximum(n_new, 0.0)
 
-        # Évolution concentration
+        # Evolution concentration (simple/stable)
         C = max(C - 0.02 * S * dt / 60.0, Cs)
 
-        # Profil thermique
+        # Profils de refroidissement
         if profil == "lineaire":
-            T = T_init - (T_init - 35.0) * (t / duree)
+            T = T_init - (T_init - 35.0) * (t / max(duree, 1e-12))
         elif profil == "expo":
             T = 35.0 + (T_init - 35.0) * np.exp(-0.003 * t)
-        else:
+        else:  # "S_const"
             T = max(T - 0.3 * (S - 0.05), 35.0)
 
         Lmean, CV = moments(L, n)
