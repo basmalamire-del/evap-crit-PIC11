@@ -1,4 +1,4 @@
-numpy>=1.21.0
+numpy>=1.26.4
 scipy>=1.7.0
 matplotlib>=3.4.0
 CoolProp>=6.4.1
