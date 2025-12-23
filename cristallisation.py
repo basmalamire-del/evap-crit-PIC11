@@ -1,28 +1,16 @@
 # cristallisation.py
 import numpy as np
 
-# -----------------------------
-# Outils numeriques robustes
-# (compatibles numpy 1.x et 2.x)
-# -----------------------------
-def trapz_robuste(y, x):
+# ---------- helpers robustes ----------
+def trapz_compat(y, x):
     """
-    Intégration trapèzes sans dépendre de np.trapz / np.trapezoid
-    Compatible partout (numpy 1.x / 2.x).
+    Compat numpy: utilise np.trapz (numpy 1.x) sans dépendre de np.trapezoid (pas dispo sur anciennes versions).
     """
-    y = np.asarray(y, dtype=float)
-    x = np.asarray(x, dtype=float)
-    if y.size < 2:
-        return 0.0
-    dx = np.diff(x)
-    return float(np.sum(0.5 * (y[:-1] + y[1:]) * dx))
+    return np.trapz(y, x)
 
-
-# -----------------------------
-# Modèle cristallisation (batch)
-# -----------------------------
+# ---------- modèle ----------
 def solubilite(T):
-    # T en °C, retourne C* (g / 100 g solution) - corrélation donnée
+    # T en °C, retourne C* en g/100g solution
     return 64.18 + 0.1337 * T + 5.52e-3 * T**2 - 9.73e-6 * T**3
 
 
@@ -46,9 +34,9 @@ def croissance(S, T):
 
 
 def moments(L, n):
-    m0 = trapz_robuste(n, L)
-    m1 = trapz_robuste(L * n, L)
-    m2 = trapz_robuste((L**2) * n, L)
+    m0 = trapz_compat(n, L)
+    m1 = trapz_compat(L * n, L)
+    m2 = trapz_compat((L**2) * n, L)
 
     if m0 <= 0:
         return 0.0, 0.0
@@ -72,32 +60,32 @@ def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lin
     T = float(T_init)
     C = float(C_init)
 
-    tvec = np.arange(0.0, float(duree) + float(dt), float(dt))
+    tvec = np.arange(0, duree + dt, dt)
 
     hist = {"t": [], "T": [], "S": [], "C": [], "Cs": [], "Lmean": [], "CV": []}
 
     for t in tvec:
-        Cs = float(solubilite(T))
-        S = float(sursaturation(C, Cs))
+        Cs = solubilite(T)
+        S = sursaturation(C, Cs)
 
-        mT = trapz_robuste((L**3) * n, L)
-        B = float(nucleation(S, mT))
-        G = float(croissance(S, T))
+        mT = trapz_compat((L**3) * n, L)
+        B = nucleation(S, mT)
+        G = croissance(S, T)
 
-        # Transport (upwind) - robuste
-        if G > 0.0:
+        # transport (upwind)
+        if G > 0:
             n_new = np.copy(n)
             for i in range(1, N):
                 n_new[i] = n[i] - dt * G * (n[i] - n[i - 1]) / dL
             n_new[0] = B / max(G, 1e-12)
             n = np.maximum(n_new, 0.0)
 
-        # Evolution concentration (simple/stable)
+        # évolution concentration (simple)
         C = max(C - 0.02 * S * dt / 60.0, Cs)
 
-        # Profils de refroidissement
+        # profils de refroidissement
         if profil == "lineaire":
-            T = T_init - (T_init - 35.0) * (t / max(duree, 1e-12))
+            T = T_init - (T_init - 35.0) * (t / duree)
         elif profil == "expo":
             T = 35.0 + (T_init - 35.0) * np.exp(-0.003 * t)
         else:  # "S_const"
