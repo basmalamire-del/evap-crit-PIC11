@@ -1,162 +1,122 @@
 # evaporateurs.py
-# Modèle simplifié d'une batterie d'évaporateurs multiples (pédagogique)
-# Retourne un dictionnaire compatible Streamlit : S, E, A, A_totale, T, x, L, V
-
 import numpy as np
-from dataclasses import dataclass
-from CoolProp.CoolProp import PropsSI
+from thermodynamique import lmtd, U_global, Tsat_from_Pbar, lambda_vapeur, bpe_sucre
 
+# --------- Helpers robustes ---------
+def _as_array(x):
+    return np.asarray(x)
 
-def _Tsat_eau(P_bar: float) -> float:
-    """Température de saturation eau (°C) à la pression P (bar abs)."""
-    T = PropsSI("T", "P", P_bar * 1e5, "Q", 0, "Water")
-    return T - 273.15
-
-
-def _chaleur_latente_bar(P_bar: float) -> float:
-    """Chaleur latente de vaporisation (J/kg) à P (bar abs)."""
-    h_v = PropsSI("H", "P", P_bar * 1e5, "Q", 1, "Water")
-    h_l = PropsSI("H", "P", P_bar * 1e5, "Q", 0, "Water")
-    return h_v - h_l
-
-
-def _EPE_duhring(xm: float) -> float:
-    """
-    Élévation du point d'ébullition (°C) vs fraction massique saccharose.
-    Corrélation simple type Dühring (approx).
-    """
-    x = xm * 100.0  # %
-    if x < 50:
-        A, B = 0.03, 0.00015
-    else:
-        A, B = 0.045, 0.00030
-    return A * x + B * x * x
-
-
-def _Teb_solution(P_bar: float, xm: float) -> float:
-    """Température d'ébullition solution saccharose/eau (°C)."""
-    return _Tsat_eau(P_bar) + _EPE_duhring(xm)
-
-
-@dataclass
-class Effet:
-    P_bar: float
-    U: float  # W/m²/K
+def _to_scalar(x, default=0.0):
+    a = _as_array(x)
+    if a.size == 0:
+        return float(default)
+    if a.size == 1:
+        return float(a.ravel()[0])
+    return float(np.mean(a))
 
 
 class EvaporateurMultiple:
     """
-    Batterie d'évaporateurs multiples (simplifiée et stable).
-
+    Batterie d'évaporateurs multiples (modèle PIC stable pour dashboard).
     Entrées:
-      F (kg/h), xF (-), xout (-), T_feed (°C), Psteam (bar abs), n_effets (2..5)
-
-    Sorties (via simuler()):
-      L, V, x, T, A, A_totale, S, E
+        F (kg/h), xF, xout, Tfeed (°C), Psteam (bar), n_effets
+    Sorties:
+        dict avec S, E, A_totale + profils par effet (L, V, x, A, T, Tsat, ...)
     """
 
-    def __init__(self, F, xF, xout, T_feed_C, P_steam_bar, n_effets=3):
+    def __init__(self, F, xF, xout, Tfeed, Psteam, n_effets=3):
         self.F = float(F)
         self.xF = float(xF)
         self.xout = float(xout)
-        self.T_feed = float(T_feed_C)
-        self.Psteam = float(P_steam_bar)
+        self.Tfeed = float(Tfeed)
+        self.Psteam = float(Psteam)
         self.n = int(n_effets)
 
-        if not (2 <= self.n <= 5):
-            raise ValueError("n_effets doit être entre 2 et 5.")
-        if not (0 < self.xF < 1 and 0 < self.xout < 1):
-            raise ValueError("xF et xout doivent être des fractions (0..1).")
+        if not (0 < self.xF < 1) or not (0 < self.xout < 1):
+            raise ValueError("xF et xout doivent être entre 0 et 1.")
         if self.xout <= self.xF:
             raise ValueError("xout doit être > xF (concentration augmente).")
-
-        # Pressions par effet (approx, bar abs)
-        self.P_eff = np.linspace(2.5, 0.15, self.n)
-
-        # U typiques (W/m²/K)
-        U_base = [2500, 2200, 1800, 1600, 1500]
-        self.U_eff = U_base[:self.n]
-
-        self.effets = [Effet(self.P_eff[i], self.U_eff[i]) for i in range(self.n)]
-
-    def bilan_matiere(self):
-        """Bilans matière simplifiés avec évaporation totale répartie uniformément."""
-        F = self.F
-        xF = self.xF
-        xout = self.xout
-        n = self.n
-
-        # Liquide sortie global
-        Lout = F * xF / xout
-        Vtot = F - Lout
-
-        # Répartition uniforme
-        V = np.full(n, Vtot / n)
-
-        # Débits liquides
-        L = np.zeros(n)
-        L[0] = F - V[0]
-        for i in range(1, n):
-            L[i] = L[i - 1] - V[i]
-
-        # Concentrations
-        x = np.zeros(n)
-        x[0] = F * xF / L[0]
-        for i in range(1, n):
-            x[i] = x[i - 1] * L[i - 1] / L[i]
-
-        return L, V, x, Lout, Vtot
+        if self.n < 1:
+            raise ValueError("n_effets >= 1")
 
     def simuler(self):
-        """
-        Simulation stable, renvoie:
-          {"L","V","x","T","A","A_totale","S","E"}
-        """
-        L, V, x, Lout, Vtot = self.bilan_matiere()
+        # --- Bilan matière global ---
+        solute = self.F * self.xF
+        L_final = solute / self.xout
+        V_tot = self.F - L_final  # eau évaporée totale (kg/h)
 
-        # Températures d'ébullition
-        Teb = np.array([_Teb_solution(self.effets[i].P_bar, x[i]) for i in range(self.n)])
+        # --- Répartition simple par effet (stable) ---
+        # On répartit l’évaporation uniformément (tu peux adapter si ton guide impose autre chose)
+        V = np.full(self.n, V_tot / self.n, dtype=float)
 
-        # Vapeur de chauffe
-        Tsteam = _Tsat_eau(self.Psteam) + 10.0
-        lambda_steam = _chaleur_latente_bar(self.Psteam)
-
-        # kg/h -> kg/s
-        V_s = V / 3600.0
-
-        Q = np.zeros(self.n)  # W
-        A = np.zeros(self.n)  # m²
+        # Débits liquides par effet
+        L = np.zeros(self.n + 1, dtype=float)
+        x = np.zeros(self.n + 1, dtype=float)
+        L[0] = self.F
+        x[0] = self.xF
 
         for i in range(self.n):
-            lambda_i = _chaleur_latente_bar(self.effets[i].P_bar)
-            Q[i] = V_s[i] * lambda_i
+            L[i + 1] = L[i] - V[i]
+            L[i + 1] = max(L[i + 1], 1e-6)
+            x[i + 1] = solute / L[i + 1]
 
-            if i == 0:
-                dT = max(Tsteam - Teb[0], 1.0)
+        # --- Profils thermiques ---
+        # Vapeur motrice (effet 1)
+        Tsteam = Tsat_from_Pbar(self.Psteam)
+
+        # On suppose une chute de température totale disponible
+        # (valeur typique, ajustable)
+        T_last = 60.0  # °C, condenseur/dernier effet
+        dT_total = max(Tsteam - T_last, 10.0)
+        dT_eff = dT_total / self.n
+
+        T_boil = np.zeros(self.n, dtype=float)
+        Tsat = np.zeros(self.n, dtype=float)
+        for i in range(self.n):
+            Tsat[i] = Tsteam - (i + 1) * dT_eff
+            # BPE sucre
+            T_boil[i] = Tsat[i] + bpe_sucre(x[i + 1])
+
+        # --- Surfaces d'échange ---
+        U = U_global("standard")
+        A = np.zeros(self.n, dtype=float)
+
+        # Hypothèse : chaleur = V[i] * lambda (approx)
+        for i in range(self.n):
+            lam = lambda_vapeur(Tsat[i])  # J/kg
+            Q = V[i] * lam / 3600.0  # W (car V en kg/h)
+
+            # ΔT1/ΔT2 (robuste)
+            # côté chaud: Tsat[i] (condensation), côté froid: T_boil[i]
+            dT1 = Tsat[i] - T_boil[i]
+            dT2 = Tsat[i] - (T_boil[i] - 2.0)  # petit écart pour éviter dT1==dT2
+            DTlm = lmtd(dT1, dT2)
+
+            if DTlm <= 0:
+                A[i] = 0.0
             else:
-                dT = max(Teb[i - 1] - Teb[i], 1.0)
+                A[i] = Q / (U * DTlm)
 
-            A[i] = Q[i] / (self.effets[i].U * dT)
+        A_totale = float(np.sum(A))
 
-        Q_tot = float(np.sum(Q))
-        S_s = Q_tot / lambda_steam
-        S_h = S_s * 3600.0
+        # --- Consommation vapeur S et économie ---
+        # Modèle simple: consommation vapeur ~ évaporation 1er effet
+        # (si ton guide impose autre chose, remplace seulement ce bloc)
+        S = float(V[0])
+        E = float(V_tot / max(S, 1e-9))
 
-        E = Vtot / S_h if S_h > 0 else 0.0
-
-        return {
-            "L": L,
-            "V": V,
-            "x": x,
-            "T": Teb,
-            "A": A,
-            "A_totale": float(np.sum(A)),
-            "S": float(S_h),
-            "E": float(E),
+        # Résultats
+        res = {
+            "S": S,
+            "E": E,
+            "A_totale": A_totale,
+            "V_tot": float(V_tot),
+            "L": L,              # taille n+1
+            "V": V,              # taille n
+            "x": x,              # taille n+1
+            "A": A,              # taille n
+            "Tsteam": float(Tsteam),
+            "Tsat": Tsat,        # taille n
+            "T_boil": T_boil,    # taille n
         }
-
-    def consommation_vapeur(self):
-        return self.simuler()["S"]
-
-    def economie_vapeur(self):
-        return self.simuler()["E"]
+        return res

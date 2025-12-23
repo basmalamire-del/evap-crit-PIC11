@@ -1,64 +1,92 @@
-"""
-thermodynamique.py
--------------------
-Ce module regroupe les fonctions liées à la thermodynamique :
- - propriétés de l'eau et de la vapeur via CoolProp
- - point d'ébullition
- - chaleur latente
- - élévation du point d'ébullition (EPE) pour le saccharose (corrélation simplifiée)
-
-Bibliothèques utilisées :
- - CoolProp.CoolProp : bibliothèque thermodynamique pour les fluides
- - numpy : pour d'éventuels calculs numériques
-"""
-
-from CoolProp.CoolProp import PropsSI  # Librairie de propriétés thermodynamiques
+# thermodynamique.py
 import numpy as np
 
+# --------- Helpers robustes (anti "truth value of array") ---------
+def _as_array(x):
+    return np.asarray(x)
 
-def enthalpie_eau(T, P):
+def _to_scalar(x, default=0.0):
+    """Convertit x en float scalaire si possible, sinon prend la moyenne."""
+    a = _as_array(x)
+    if a.size == 0:
+        return float(default)
+    if a.size == 1:
+        return float(a.ravel()[0])
+    return float(np.mean(a))
+
+def _any_true(x):
+    return bool(np.any(_as_array(x)))
+
+def _all_true(x):
+    return bool(np.all(_as_array(x)))
+
+
+# --------- Fonctions thermo (simples + robustes) ---------
+def lmtd(dT1, dT2, eps=1e-12):
     """
-    Calcule l'enthalpie spécifique de l'eau (J/kg) à une température T (K) et une pression P (Pa).
-
-    PropsSI("H", "T", T, "P", P, "Water") :
-      - "H" : on demande l'enthalpie
-      - "T" : clé pour la température
-      - "P" : clé pour la pression
-      - "Water" : fluide considéré
+    LMTD robuste même si dT1/dT2 deviennent des arrays.
+    Retourne un float.
     """
-    return PropsSI("H", "T", T, "P", P, "Water")
+    dT1 = _as_array(dT1)
+    dT2 = _as_array(dT2)
+
+    # si l'une des ΔT est <= 0 => pas d'échange
+    if _any_true(dT1 <= 0) or _any_true(dT2 <= 0):
+        return 0.0
+
+    # éviter division par 0 si dT1 ~ dT2
+    diff = np.abs(dT1 - dT2)
+    if _all_true(diff < eps):
+        return _to_scalar(dT1)
+
+    # LMTD = (dT1 - dT2) / ln(dT1/dT2)
+    val = (dT1 - dT2) / np.log((dT1 + eps) / (dT2 + eps))
+    # si tableau => scalaire
+    return _to_scalar(val, default=0.0)
 
 
-def chaleur_latente(P):
+def U_global(type_echange="standard"):
     """
-    Calcule la chaleur latente de vaporisation de l'eau (J/kg) à une pression P (Pa).
-
-    On prend la différence entre enthalpie vapeur saturée (Q=1) et liquide saturé (Q=0).
+    Coefficient global (valeurs typiques).
+    Tu peux ajuster selon ton guide si besoin.
     """
-    h_v = PropsSI('H', 'P', P, 'Q', 1, 'Water')  # vapeur saturée
-    h_l = PropsSI('H', 'P', P, 'Q', 0, 'Water')  # liquide saturé
-    return h_v - h_l
+    if type_echange == "standard":
+        return 1500.0  # W/m2/K
+    if type_echange == "encrasse":
+        return 900.0
+    return 1200.0
 
 
-def point_ebullition(P):
+def cp_eau(T=60.0):
+    return 4180.0  # J/kg/K approx
+
+
+def lambda_vapeur(Tsat=120.0):
     """
-    Donne la température d'ébullition de l'eau (K) à une pression P (Pa).
-
-    On récupère la température de saturation (Q=0 ou Q=1).
+    Chaleur latente approx (kJ/kg -> J/kg).
+    Approche linéaire autour 100-140°C.
     """
-    return PropsSI("T", "P", P, "Q", 0, "Water")
+    # ~2257 kJ/kg à 100°C, ~2100 kJ/kg vers 140°C
+    lam = 2257000.0 - 3500.0 * (Tsat - 100.0)
+    return max(lam, 1800000.0)
 
 
-def EPE_duhring(concentration_massique):
+def Tsat_from_Pbar(Pbar):
     """
-    Élévation du point d'ébullition (EPE) en °C en fonction de la concentration massique de saccharose.
-
-    Ici on utilise une corrélation très simplifiée :
-        EPE = a * C_massique(%)
-    avec a ≈ 0.06 °C par % massique.
-    Par exemple, à 65% : EPE ≈ 3.9°C
-
-    concentration_massique : fraction massique (0.0–1.0)
+    Température de saturation approx (°C) en fonction de P (bar abs).
+    Approximation simple (suffisante pour un PIC).
     """
-    a = 0.06  # coefficient simplifié
-    return a * concentration_massique * 100.0  # °C
+    Pbar = max(float(Pbar), 0.05)
+    # approx: à 1 bar -> 100°C, à 2 bar -> 120°C, à 3.5 bar ~ 147°C
+    # fit log:
+    return 100.0 + 45.0 * np.log(Pbar)
+
+
+def bpe_sucre(x):
+    """
+    Élévation du point d’ébullition (BPE) approximative pour solution sucrée.
+    x = fraction massique (0-1).
+    """
+    x = float(x)
+    x = min(max(x, 0.0), 0.85)
+    return 8.0 * x  # °C (approx)

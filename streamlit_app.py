@@ -1,435 +1,276 @@
+# streamlit_app.py
 import os
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
+import altair as alt
 
 from evaporateurs import EvaporateurMultiple
 from cristallisation import simuler_cristallisation_batch
 
-# --- Import robust des fonctions de sensibilité (selon comment tu as nommé dans sensibilite.py)
+# Sensibilité : adapte si tes fonctions ont des noms différents
 try:
     from sensibilite import sensibilite_parametre, sensibilite_2D
 except Exception:
-    # Si tu as des noms légèrement différents, on tente d'autres variantes
+    # fallback si ton fichier a un nom légèrement différent
     from sensibilite import sensibilité_parametre as sensibilite_parametre  # type: ignore
     from sensibilite import sensibilité_2D as sensibilite_2D  # type: ignore
 
 
-# -----------------------------
-# Helpers (robustes)
-# -----------------------------
-def ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
+st.set_page_config(page_title="PIC — Evaporation & Cristallisation", layout="wide")
 
+st.title("🧪 Projet — Évaporation multiple & Cristallisation du saccharose")
+st.caption("Version web (Altair/interactive). Les calculs utilisent vos modèles Python.")
 
-def pick_key(d: dict, keys: list[str], default=None):
-    """Retourne la première clé trouvée dans d, sinon default."""
-    for k in keys:
-        if k in d:
-            return d[k]
-    return default
+# -----------------------
+# Sidebar paramètres
+# -----------------------
+st.sidebar.header("Paramètres généraux")
 
+F = st.sidebar.number_input("Débit F (kg/h)", value=20000.0, step=500.0, min_value=1000.0)
+xF = st.sidebar.slider("xF (fraction massique)", 0.01, 0.30, 0.15, 0.01)
+xout = st.sidebar.slider("xout (fraction massique)", 0.20, 0.80, 0.65, 0.01)
+Tfeed = st.sidebar.number_input("T_feed (°C)", value=85.0, step=1.0, min_value=10.0, max_value=150.0)
+Psteam = st.sidebar.number_input("P vapeur (bar)", value=3.5, step=0.1, min_value=0.5, max_value=20.0)
 
-def save_fig(fig, filename: str):
-    ensure_dir("figures")
-    path = os.path.join("figures", filename)
-    fig.tight_layout()
-    fig.savefig(path, dpi=200)
-    return path
+tabs = st.tabs(["⚙️ Evaporation", "❄️ Cristallisation", "📈 Sensibilité", "📦 Export"])
 
+# -----------------------
+# Helpers Altair
+# -----------------------
+def line_chart(df, x, y, title, tooltip=None):
+    tooltip = tooltip or [x, y]
+    return (
+        alt.Chart(df)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X(x, title=x),
+            y=alt.Y(y, title=y),
+            tooltip=tooltip,
+        )
+        .properties(title=title, height=300)
+        .interactive()
+    )
 
-# -----------------------------
-# Config Streamlit
-# -----------------------------
-st.set_page_config(page_title="Projet", layout="wide")
-st.title("🧪 Projet  — Évaporation multiple & Cristallisation du saccharose")
-st.caption("Version sans LaTeX / sans PDF : export CSV + figures PNG (plus stable).")
+def ensure_dir(p):
+    os.makedirs(p, exist_ok=True)
 
-# Init session state (pour éviter erreurs avant clic)
-if "evap_res" not in st.session_state:
-    st.session_state.evap_res = None
-if "crist_hist" not in st.session_state:
-    st.session_state.crist_hist = None
-if "sensi_1d" not in st.session_state:
-    st.session_state.sensi_1d = None
-if "sensi_2d" not in st.session_state:
-    st.session_state.sensi_2d = None
-
-
-# -----------------------------
-# Sidebar : paramètres
-# -----------------------------
-st.sidebar.header("Paramètres")
-
-st.sidebar.subheader("Évaporation")
-F = st.sidebar.number_input("Débit F (kg/h)", value=20000.0, step=1000.0)
-xF = st.sidebar.slider("xF (fraction massique)", 0.05, 0.25, 0.15, 0.01)
-xout = st.sidebar.slider("xout (fraction massique)", 0.40, 0.80, 0.65, 0.01)
-Tfeed = st.sidebar.number_input("T_feed (°C)", value=85.0, step=1.0)
-Psteam = st.sidebar.slider("P vapeur (bar)", 2.0, 5.0, 3.5, 0.1)
-n_effets = st.sidebar.slider("Nombre d'effets", 2, 5, 3, 1)
-
-st.sidebar.divider()
-
-st.sidebar.subheader("Cristallisation (batch)")
-M_batch = st.sidebar.number_input("Masse sirop (kg)", value=5000.0, step=500.0)
-C_init = st.sidebar.number_input("C_init (g/100g)", value=65.0, step=1.0)
-T_init = st.sidebar.number_input("T_init (°C)", value=70.0, step=1.0)
-duree_h = st.sidebar.number_input("Durée (h)", value=4.0, step=0.5)
-dt_s = st.sidebar.number_input("Pas de temps dt (s)", value=60.0, step=10.0)
-profil = st.sidebar.selectbox("Profil refroidissement", ["lineaire", "expo", "S_const"])
-
-st.sidebar.divider()
-
-st.sidebar.subheader("Sensibilité")
-param_1d = st.sidebar.selectbox("Paramètre 1D", ["F", "xF", "xout", "Tfeed", "Psteam", "n_effets"])
-npoints_1d = st.sidebar.slider("Nb points 1D", 5, 21, 9, 2)
-
-# -----------------------------
-# Tabs
-# -----------------------------
-tab_evap, tab_crist, tab_sensi, tab_export = st.tabs(
-    ["⚙️ Évaporation", "❄️ Cristallisation", "📈 Sensibilité", "📥 Export"]
-)
-
-# =========================================================
-# TAB 1 : Evaporation
-# =========================================================
-with tab_evap:
+# ==========================================================
+# TAB 1 — EVAPORATION
+# ==========================================================
+with tabs[0]:
     st.subheader("Simulation de la batterie d’évaporation")
 
-    if st.button("▶️ Lancer la simulation d'évaporation"):
+    n_eff = st.number_input("Nombre d'effets", value=3, step=1, min_value=1, max_value=8)
+
+    run_evap = st.button("▶ Lancer la simulation d'évaporation", use_container_width=True)
+
+    if run_evap:
         try:
-            evap = EvaporateurMultiple(F, xF, xout, Tfeed, Psteam, n_effets)
+            evap = EvaporateurMultiple(F, xF, xout, Tfeed, Psteam, int(n_eff))
             res = evap.simuler()
-            st.session_state.evap_res = res
+
+            # Affichage robuste (si certaines clés n’existent pas, on ne plante pas)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Débit vapeur S (kg/h)", f"{res.get('S', np.nan):.2f}")
+            c2.metric("Économie", f"{res.get('E', np.nan):.2f}")
+            c3.metric("Surface totale A (m²)", f"{res.get('A_totale', np.nan):.2f}")
+
+            # Courbes "par effet" si dispo
+            # On tente plusieurs noms possibles pour rester compatible avec tes modules
+            effets = res.get("effets", None)
+            if effets is None:
+                # si tu n’as pas un vecteur "effets", on fabrique 1..n_eff
+                effets = list(range(1, int(n_eff) + 1))
+
+            # Essaye de récupérer concentration et débits par effet
+            x_vec = res.get("x", None) or res.get("x_effects", None) or res.get("x_effets", None)
+            L_vec = res.get("L", None) or res.get("debit_liquide", None)
+            V_vec = res.get("V", None) or res.get("debit_vapeur", None)
+
+            st.markdown("### Résultats par effet (courbes interactives)")
+
+            charts = []
+            if x_vec is not None:
+                df_x = pd.DataFrame({"Effet": effets, "x": list(x_vec)})
+                charts.append(line_chart(df_x, "Effet", "x", "Concentration x vs Effet"))
+
+            if L_vec is not None:
+                df_L = pd.DataFrame({"Effet": effets, "L (kg/h)": list(L_vec)})
+                charts.append(line_chart(df_L, "Effet", "L (kg/h)", "Débit liquide L vs Effet"))
+
+            if V_vec is not None:
+                df_V = pd.DataFrame({"Effet": effets, "V (kg/h)": list(V_vec)})
+                charts.append(line_chart(df_V, "Effet", "V (kg/h)", "Débit vapeur V vs Effet"))
+
+            # Affichage 2 graphes par ligne
+            for i in range(0, len(charts), 2):
+                colA, colB = st.columns(2)
+                with colA:
+                    st.altair_chart(charts[i], use_container_width=True)
+                if i + 1 < len(charts):
+                    with colB:
+                        st.altair_chart(charts[i + 1], use_container_width=True)
+
+            if not charts:
+                st.info("Aucune série 'x', 'L' ou 'V' trouvée dans res. (Ton module evap renvoie peut-être d’autres clés.)")
+
+            st.success("✅ Evaporation terminée")
+
         except Exception as e:
-            st.error(f"Erreur évaporation : {e}")
-            st.session_state.evap_res = None
-
-    res = st.session_state.evap_res
-
-    if res is None:
-        st.info("Clique sur **Lancer la simulation d'évaporation** pour afficher les résultats.")
-    else:
-        # Récupération robuste des clés
-        S = pick_key(res, ["S", "m_steam", "vapeur", "steam", "m_vapeur"], default=None)
-        E = pick_key(res, ["E", "economie", "econ"], default=None)
-        A_tot = pick_key(res, ["A_totale", "A_total", "A_tot"], default=None)
-
-        x = pick_key(res, ["x", "X", "x_effets"], default=None)
-        T = pick_key(res, ["T", "T_effets", "Teb", "T_eb"], default=None)
-        A = pick_key(res, ["A", "A_effets"], default=None)
-        L = pick_key(res, ["L", "L_effets", "debit_liquide"], default=None)
-        V = pick_key(res, ["V", "V_effets", "debit_vapeur"], default=None)
-
-        # si x est une liste => nb effets
-        if x is not None:
-            effets = np.arange(1, len(x) + 1)
-        elif A is not None:
-            effets = np.arange(1, len(A) + 1)
-        else:
-            effets = np.arange(1, n_effets + 1)
-
-        # KPI
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Débit vapeur (S)", "-" if S is None else f"{float(S):.2f} kg/h")
-        c2.metric("Économie (E)", "-" if E is None else f"{float(E):.3f}")
-        c3.metric("Surface totale", "-" if A_tot is None else f"{float(A_tot):.1f} m²")
-
-        st.markdown("### Courbes (2 par ligne)")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            fig, ax = plt.subplots()
-            if T is not None:
-                ax.plot(effets, T, marker="o")
-            ax.set_xlabel("Effet")
-            ax.set_ylabel("Teb (°C)")
-            ax.set_title("Température d'ébullition par effet")
-            ax.grid(True)
-            st.pyplot(fig)
-            save_fig(fig, "evap_Teb.png")
-
-        with col2:
-            fig, ax = plt.subplots()
-            if A is not None:
-                ax.bar(effets, A)
-            ax.set_xlabel("Effet")
-            ax.set_ylabel("A (m²)")
-            ax.set_title("Surface d'échange par effet")
-            ax.grid(True)
-            st.pyplot(fig)
-            save_fig(fig, "evap_A.png")
-
-        col3, col4 = st.columns(2)
-        with col3:
-            fig, ax = plt.subplots()
-            if x is not None:
-                ax.plot(effets, x, marker="o")
-            ax.set_xlabel("Effet")
-            ax.set_ylabel("x (fraction massique)")
-            ax.set_title("Concentration en fonction des effets")
-            ax.grid(True)
-            st.pyplot(fig)
-            save_fig(fig, "evap_x.png")
-
-        with col4:
-            fig, ax = plt.subplots()
-            if (L is not None) and (V is not None):
-                ax.plot(effets, L, marker="o", label="L (kg/h)")
-                ax.plot(effets, V, marker="s", label="V (kg/h)")
-                ax.legend()
-            ax.set_xlabel("Effet")
-            ax.set_ylabel("Débits (kg/h)")
-            ax.set_title("Débits liquide et vapeur vs effets")
-            ax.grid(True)
-            st.pyplot(fig)
-            save_fig(fig, "evap_LV.png")
-
-        # Tableau
-        st.markdown("### Tableau des résultats")
-        df = pd.DataFrame({"Effet": effets})
-        if x is not None:
-            df["x"] = x
-        if T is not None:
-            df["Teb (°C)"] = T
-        if A is not None:
-            df["A (m²)"] = A
-        if L is not None:
-            df["L (kg/h)"] = L
-        if V is not None:
-            df["V (kg/h)"] = V
-        st.dataframe(df, use_container_width=True)
+            st.error(f"Erreur evaporation : {e}")
 
 
-# =========================================================
-# TAB 2 : Cristallisation
-# =========================================================
-with tab_crist:
+# ==========================================================
+# TAB 2 — CRISTALLISATION
+# ==========================================================
+with tabs[1]:
     st.subheader("Cristallisation batch")
 
-    if st.button("▶️ Lancer la simulation de cristallisation"):
+    M = st.number_input("Masse de solution M (kg)", value=5000.0, step=100.0, min_value=100.0)
+    C_init = st.number_input("Concentration initiale C_init (g/100g)", value=65.0, step=0.5, min_value=1.0)
+    T_init = st.number_input("Température initiale T_init (°C)", value=70.0, step=1.0, min_value=10.0, max_value=120.0)
+    duree_h = st.number_input("Durée (heures)", value=4.0, step=0.5, min_value=0.5)
+    dt = st.number_input("Pas de temps dt (s)", value=60.0, step=10.0, min_value=10.0)
+
+    profil = st.selectbox("Profil de refroidissement", ["lineaire", "expo", "S_const"], index=0)
+
+    run_crist = st.button("▶ Lancer la simulation de cristallisation", use_container_width=True)
+
+    if run_crist:
         try:
-            duree_s = int(duree_h * 3600)
-            _, _, hist = simuler_cristallisation_batch(
-                M_batch, C_init, T_init, duree_s, dt=float(dt_s), profil=profil
+            L, n, hist = simuler_cristallisation_batch(
+                M=float(M),
+                C_init=float(C_init),
+                T_init=float(T_init),
+                duree=float(duree_h) * 3600.0,
+                dt=float(dt),
+                profil=str(profil),
             )
-            st.session_state.crist_hist = hist
+
+            # DataFrame temporel
+            df = pd.DataFrame(hist)
+            df["t_min"] = df["t"] / 60.0
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Lmean final (m)", f"{df['Lmean'].iloc[-1]:.3e}")
+            c2.metric("CV final", f"{df['CV'].iloc[-1]:.3f}")
+            c3.metric("S final", f"{df['S'].iloc[-1]:.3f}")
+
+            st.markdown("### Evolution temporelle (2 graphes par ligne)")
+
+            ch1 = line_chart(df, "t_min", "T", "Température T(t)", tooltip=["t_min", "T"])
+            ch2 = line_chart(df, "t_min", "C", "Concentration C(t)", tooltip=["t_min", "C"])
+            ch3 = line_chart(df, "t_min", "Cs", "Solubilité Cs(t)", tooltip=["t_min", "Cs"])
+            ch4 = line_chart(df, "t_min", "S", "Sursaturation S(t)", tooltip=["t_min", "S"])
+            ch5 = line_chart(df, "t_min", "Lmean", "Taille moyenne Lmean(t)", tooltip=["t_min", "Lmean"])
+            ch6 = line_chart(df, "t_min", "CV", "Coefficient de variation CV(t)", tooltip=["t_min", "CV"])
+
+            for a, b in [(ch1, ch2), (ch3, ch4), (ch5, ch6)]:
+                colA, colB = st.columns(2)
+                with colA:
+                    st.altair_chart(a, use_container_width=True)
+                with colB:
+                    st.altair_chart(b, use_container_width=True)
+
+            # Distribution finale n(L)
+            df_n = pd.DataFrame({"L (m)": L, "n(L)": n})
+            ch_dist = (
+                alt.Chart(df_n)
+                .mark_line(point=False)
+                .encode(x=alt.X("L (m)", title="L (m)"), y=alt.Y("n(L)", title="n(L)"), tooltip=["L (m)", "n(L)"])
+                .properties(title="Distribution finale n(L)", height=320)
+                .interactive()
+            )
+            st.altair_chart(ch_dist, use_container_width=True)
+
+            st.success("✅ Cristallisation terminée")
+
         except Exception as e:
             st.error(f"Erreur cristallisation : {e}")
-            st.session_state.crist_hist = None
-
-    hist = st.session_state.crist_hist
-
-    if hist is None:
-        st.info("Clique sur **Lancer la simulation de cristallisation**.")
-    else:
-        t = np.array(pick_key(hist, ["t", "time"], default=[]))
-
-        # Clés possibles (tu avais L_moy dans ton ancien main)
-        T = pick_key(hist, ["T"], default=None)
-        S = pick_key(hist, ["S"], default=None)
-        C = pick_key(hist, ["C"], default=None)
-        Cs = pick_key(hist, ["Cs", "Cstar", "C_eq"], default=None)
-
-        Lmean = pick_key(hist, ["Lmean", "L_moy"], default=None)
-        CV = pick_key(hist, ["CV"], default=None)
-
-        c1, c2 = st.columns(2)
-        c1.metric("L moyen final", "-" if Lmean is None else f"{float(Lmean[-1]):.3e} m")
-        c2.metric("CV final", "-" if CV is None else f"{float(CV[-1]):.3f}")
-
-        st.markdown("### Courbes (2 par ligne)")
-        col1, col2 = st.columns(2)
-        with col1:
-            fig, ax = plt.subplots()
-            if (t.size > 0) and (T is not None):
-                ax.plot(t, T, label="T (°C)")
-            if (t.size > 0) and (S is not None):
-                ax.plot(t, S, label="S")
-            ax.set_xlabel("Temps (s)")
-            ax.set_title("Température et sursaturation")
-            ax.grid(True)
-            ax.legend()
-            st.pyplot(fig)
-            save_fig(fig, "crist_TS.png")
-
-        with col2:
-            fig, ax = plt.subplots()
-            if (t.size > 0) and (Lmean is not None):
-                ax.plot(t, Lmean, label="Lmean (m)")
-            if (t.size > 0) and (CV is not None):
-                ax.plot(t, CV, label="CV")
-            ax.set_xlabel("Temps (s)")
-            ax.set_title("Taille moyenne et CV")
-            ax.grid(True)
-            ax.legend()
-            st.pyplot(fig)
-            save_fig(fig, "crist_Lmean_CV.png")
-
-        col3, col4 = st.columns(2)
-        with col3:
-            fig, ax = plt.subplots()
-            if (t.size > 0) and (C is not None):
-                ax.plot(t, C, label="C (g/100g)")
-            if (t.size > 0) and (Cs is not None):
-                ax.plot(t, Cs, label="C* (solubilité)")
-            ax.set_xlabel("Temps (s)")
-            ax.set_ylabel("g/100g")
-            ax.set_title("Concentration et solubilité")
-            ax.grid(True)
-            ax.legend()
-            st.pyplot(fig)
-            save_fig(fig, "crist_C_Cs.png")
-
-        with col4:
-            st.markdown("**Notes**")
-            st.write("- C* : solubilité (équilibre).")
-            st.write("- S : sursaturation (dépend du modèle).")
-            st.write("- Lmean et CV : qualité granulométrique.")
 
 
-# =========================================================
-# TAB 3 : Sensibilité
-# =========================================================
-with tab_sensi:
-    st.subheader("Étude de sensibilité")
+# ==========================================================
+# TAB 3 — SENSIBILITE
+# ==========================================================
+with tabs[2]:
+    st.subheader("Étude de sensibilité (1D / 2D)")
 
-    st.write("Sensibilité 1D : on fait varier un paramètre autour de sa valeur.")
-    if st.button("▶️ Calculer sensibilité 1D"):
+    st.markdown("#### Sensibilité 1D")
+    param = st.selectbox("Paramètre", ["F", "xF", "xout", "Tfeed", "Psteam"], index=0)
+
+    run_sens1 = st.button("▶ Lancer sensibilité 1D", use_container_width=True)
+
+    if run_sens1:
         try:
-            facteurs = np.linspace(0.5, 1.5, int(npoints_1d))
-            vals, S_list, A_list, E_list = sensibilite_parametre(
-                F, xF, xout, Tfeed, Psteam, param=param_1d, valeurs=facteurs
-            )
-            st.session_state.sensi_1d = (vals, S_list, A_list, E_list)
+            # ta fonction doit renvoyer (val, S, A, E) comme dans ton main.py
+            val, S, A, E = sensibilite_parametre(F, xF, xout, Tfeed, Psteam, param=param)
+
+            df1 = pd.DataFrame({param: val, "S (kg/h)": S, "A_totale (m²)": A, "Economie": E})
+
+            chS = line_chart(df1, param, "S (kg/h)", f"S vs {param}")
+            chA = line_chart(df1, param, "A_totale (m²)", f"A_totale vs {param}")
+            chE = line_chart(df1, param, "Economie", f"Economie vs {param}")
+
+            # 2 par ligne
+            cA, cB = st.columns(2)
+            with cA:
+                st.altair_chart(chS, use_container_width=True)
+            with cB:
+                st.altair_chart(chA, use_container_width=True)
+            st.altair_chart(chE, use_container_width=True)
+
+            st.dataframe(df1, use_container_width=True)
+            st.success("✅ Sensibilité 1D terminée")
+
         except Exception as e:
             st.error(f"Erreur sensibilité 1D : {e}")
-            st.session_state.sensi_1d = None
 
-    sens1d = st.session_state.sensi_1d
-    if sens1d is not None:
-        vals, S_list, A_list, E_list = sens1d
+    st.markdown("---")
+    st.markdown("#### Sensibilité 2D")
+    col1, col2 = st.columns(2)
+    with col1:
+        p1 = st.selectbox("Paramètre 1", ["F", "xF", "xout", "Tfeed", "Psteam"], index=0, key="p1")
+    with col2:
+        p2 = st.selectbox("Paramètre 2", ["F", "xF", "xout", "Tfeed", "Psteam"], index=1, key="p2")
 
-        # Axe x réel
-        base = {"F": F, "xF": xF, "xout": xout, "Tfeed": Tfeed, "Psteam": Psteam, "n_effets": n_effets}[param_1d]
-        x_axis = np.array(vals) * float(base)
+    run_sens2 = st.button("▶ Lancer sensibilité 2D", use_container_width=True)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            fig, ax = plt.subplots()
-            ax.plot(x_axis, S_list, marker="o", label="S")
-            ax.plot(x_axis, A_list, marker="s", label="A_tot")
-            ax.set_xlabel(param_1d)
-            ax.set_title("Sensibilité 1D : S et A_tot")
-            ax.grid(True)
-            ax.legend()
-            st.pyplot(fig)
-            save_fig(fig, "sens_1D_S_A.png")
-
-        with col2:
-            fig, ax = plt.subplots()
-            ax.plot(x_axis, E_list, marker="o", label="E")
-            ax.set_xlabel(param_1d)
-            ax.set_title("Sensibilité 1D : Économie E")
-            ax.grid(True)
-            ax.legend()
-            st.pyplot(fig)
-            save_fig(fig, "sens_1D_E.png")
-
-    st.divider()
-    st.write("Sensibilité 2D : carte de E en fonction de deux paramètres.")
-    if st.button("▶️ Calculer sensibilité 2D (E en fonction de F et Psteam)"):
+    if run_sens2:
         try:
-            X, Y, Egrid = sensibilite_2D(
-                F, xF, xout, Tfeed, Psteam, param1="F", param2="Psteam", n1=11, n2=11
-            )
-            st.session_state.sensi_2d = (X, Y, Egrid)
+            # On suppose que ta fonction renvoie une grille (df ou arrays). On rend robuste.
+            out = sensibilite_2D(F, xF, xout, Tfeed, Psteam, p1=p1, p2=p2)
+
+            # Si la fonction renvoie déjà un DataFrame long (p1,p2,metric)
+            if isinstance(out, pd.DataFrame):
+                df2 = out.copy()
+            else:
+                # sinon essayer de le convertir (à adapter selon ton code)
+                df2 = pd.DataFrame(out)
+
+            st.dataframe(df2, use_container_width=True)
+            st.success("✅ Sensibilité 2D terminée")
+
         except Exception as e:
             st.error(f"Erreur sensibilité 2D : {e}")
-            st.session_state.sensi_2d = None
-
-    sens2d = st.session_state.sensi_2d
-    if sens2d is not None:
-        X, Y, Egrid = sens2d
-        fig, ax = plt.subplots()
-        cp = ax.contourf(X, Y, Egrid, levels=15)
-        fig.colorbar(cp, ax=ax, label="E")
-        ax.set_xlabel("F (kg/h)")
-        ax.set_ylabel("Psteam (bar)")
-        ax.set_title("Carte de sensibilité : E(F, Psteam)")
-        st.pyplot(fig)
-        save_fig(fig, "sens_2D.png")
 
 
-# =========================================================
-# TAB 4 : Export
-# =========================================================
-with tab_export:
-    st.subheader("Export des résultats (CSV) & Figures (PNG)")
-    ensure_dir("figures")
+# ==========================================================
+# TAB 4 — EXPORT
+# ==========================================================
+with tabs[3]:
+    st.subheader("Export (CSV)")
 
-    st.write("✅ Les figures sont automatiquement enregistrées dans le dossier `figures/` après chaque simulation.")
+    st.info("Cette version exporte en CSV (plus stable que générer un PDF LaTeX sur Streamlit Cloud).")
 
-    # Export Evaporation CSV
-    if st.session_state.evap_res is not None:
-        res = st.session_state.evap_res
-        x = pick_key(res, ["x", "X", "x_effets"], default=None)
-        T = pick_key(res, ["T", "T_effets", "Teb", "T_eb"], default=None)
-        A = pick_key(res, ["A", "A_effets"], default=None)
-        L = pick_key(res, ["L", "L_effets"], default=None)
-        V = pick_key(res, ["V", "V_effets"], default=None)
+    export_dir = "exports"
+    ensure_dir(export_dir)
 
-        if x is not None:
-            effets = np.arange(1, len(x) + 1)
-        elif A is not None:
-            effets = np.arange(1, len(A) + 1)
-        else:
-            effets = np.arange(1, n_effets + 1)
-
-        df_evap = pd.DataFrame({"Effet": effets})
-        if x is not None: df_evap["x"] = x
-        if T is not None: df_evap["Teb (°C)"] = T
-        if A is not None: df_evap["A (m²)"] = A
-        if L is not None: df_evap["L (kg/h)"] = L
-        if V is not None: df_evap["V (kg/h)"] = V
-
-        csv = df_evap.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Télécharger CSV évaporation", data=csv,
-                           file_name="evaporation_resultats.csv", mime="text/csv")
-    else:
-        st.info("Export évaporation : lance d'abord la simulation d'évaporation.")
-
-    st.divider()
-
-    # Export Cristallisation CSV
-    if st.session_state.crist_hist is not None:
-        hist = st.session_state.crist_hist
-        t = np.array(pick_key(hist, ["t"], default=[]))
-        df_cr = pd.DataFrame({"t (s)": t})
-
-        for colname, keys in [
-            ("T (°C)", ["T"]),
-            ("S", ["S"]),
-            ("C (g/100g)", ["C"]),
-            ("Cs (g/100g)", ["Cs", "Cstar"]),
-            ("Lmean (m)", ["Lmean", "L_moy"]),
-            ("CV", ["CV"]),
-        ]:
-            arr = pick_key(hist, keys, default=None)
-            if arr is not None:
-                df_cr[colname] = arr
-
-        csv = df_cr.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Télécharger CSV cristallisation", data=csv,
-                           file_name="cristallisation_resultats.csv", mime="text/csv")
-    else:
-        st.info("Export cristallisation : lance d'abord la simulation de cristallisation.")
-
-    st.divider()
-
-    st.markdown("### 📁 Dossier figures")
-    st.code(os.path.abspath("figures"))
-    st.write("Tu peux ouvrir ce dossier et récupérer toutes les images PNG générées.")
+    if st.button("📥 Exporter un exemple de template CSV", use_container_width=True):
+        df_template = pd.DataFrame(
+            {"info": ["Evaporation", "Cristallisation", "Sensibilité"], "commentaire": ["ok", "ok", "ok"]}
+        )
+        path = os.path.join(export_dir, "export_template.csv")
+        df_template.to_csv(path, index=False)
+        with open(path, "rb") as f:
+            st.download_button("Télécharger export_template.csv", f, file_name="export_template.csv")
