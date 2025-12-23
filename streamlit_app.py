@@ -6,7 +6,7 @@ import streamlit as st
 
 from evaporateurs import EvaporateurMultiple
 from cristallisation import simuler_cristallisation_batch
-
+st.sidebar.success("✅ CI/CD automatique activé - Test réussi !")
 # --- Import robust des fonctions de sensibilité (selon comment tu as nommé dans sensibilite.py)
 try:
     from sensibilite import sensibilite_parametre, sensibilite_2D
@@ -43,7 +43,7 @@ def save_fig(fig, filename: str):
 # Config Streamlit
 # -----------------------------
 st.set_page_config(page_title="Projet", layout="wide")
-st.title("🧪 Projet  nodo bsha sushi —  multiple & Cristallisation du saccharose")
+st.title("🧪 Projet  Evaporation—  multiple & Cristallisation du saccharose")
 st.caption("Version sans LaTeX / sans PDF : export CSV + figures PNG (plus stable).")
 
 # Init session state (pour éviter erreurs avant clic)
