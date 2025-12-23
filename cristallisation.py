@@ -1,22 +1,28 @@
 # cristallisation.py
 import numpy as np
 
+def _trapz(y, x):
+    """
+    Intégration trapèzes robuste : NumPy récent utilise np.trapezoid.
+    On garde un fallback pour compatibilité.
+    """
+    if hasattr(np, "trapezoid"):
+        return np.trapezoid(y, x)
+    # fallback (très vieux numpy)
+    return np.trapz(y, x)
 
 def solubilite(T):
     # T en °C, retourne C* en g/100g solution
     return 64.18 + 0.1337 * T + 5.52e-3 * T**2 - 9.73e-6 * T**3
 
-
 def sursaturation(C, Cs):
     return max((C - Cs) / Cs, 0.0)
-
 
 def nucleation(S, mT):
     kb = 1.5e10
     b = 2.5
     j = 0.5
     return kb * (S**b) * max(mT, 1e-12) ** j
-
 
 def croissance(S, T):
     kg = 2.8e-7
@@ -25,11 +31,10 @@ def croissance(S, T):
     Eg = 45000
     return kg * (S**g) * np.exp(-Eg / (R * (T + 273.15)))
 
-
 def moments(L, n):
-    m0 = np.trapz(n, L)
-    m1 = np.trapz(L * n, L)
-    m2 = np.trapz(L * L * n, L)
+    m0 = _trapz(n, L)
+    m1 = _trapz(L * n, L)
+    m2 = _trapz((L**2) * n, L)
     if m0 <= 0:
         return 0.0, 0.0
     Lmean = m1 / m0
@@ -37,11 +42,10 @@ def moments(L, n):
     CV = np.sqrt(var) / Lmean if Lmean > 0 else 0.0
     return float(Lmean), float(CV)
 
-
 def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lineaire"):
     """
     Retourne : L, n(L), hist
-    hist contient toujours : t, T, S, C, Cs, Lmean, CV
+    hist contient : t, T, S, C, Cs, Lmean, CV
     """
     N = 80
     L = np.linspace(0.0, 8e-4, N)
@@ -52,14 +56,13 @@ def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lin
     C = float(C_init)
 
     tvec = np.arange(0, duree + dt, dt)
-
     hist = {"t": [], "T": [], "S": [], "C": [], "Cs": [], "Lmean": [], "CV": []}
 
     for t in tvec:
         Cs = solubilite(T)
         S = sursaturation(C, Cs)
 
-        mT = np.trapz((L**3) * n, L)
+        mT = _trapz((L**3) * n, L)
         B = nucleation(S, mT)
         G = croissance(S, T)
 
@@ -71,7 +74,7 @@ def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lin
             n_new[0] = B / max(G, 1e-12)
             n = np.maximum(n_new, 0.0)
 
-        # évolution concentration (stable)
+        # évolution concentration (simple et stable)
         C = max(C - 0.02 * S * dt / 60.0, Cs)
 
         # profils de refroidissement
