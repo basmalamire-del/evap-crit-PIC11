@@ -10,7 +10,7 @@ from cristallisation import simuler_cristallisation_batch
 
 st.set_page_config(page_title="PIC — Évaporation & Cristallisation", layout="wide")
 
-st.title("🧪 Projet1234 — Évaporation multiple & Cristallisation du saccharose")
+st.title("🧪 Projet — Évaporation multiple & Cristallisation du saccharose")
 st.caption("Interface web (Streamlit) — graphes interactifs (Altair/Vega-Lite, style D3).")
 
 tab_evap, tab_crist, tab_sens, tab_export = st.tabs(

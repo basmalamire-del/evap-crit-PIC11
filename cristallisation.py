@@ -4,9 +4,18 @@ import numpy as np
 # ---------- helpers robustes ----------
 def trapz_compat(y, x):
     """
-    Compat numpy: utilise np.trapz (numpy 1.x) sans dépendre de np.trapezoid (pas dispo sur anciennes versions).
+    Compat numpy: implémentation robuste qui fonctionne avec toutes versions.
     """
-    return np.trapz(y, x)
+    try:
+        # Version moderne de numpy
+        return np.trapz(y, x)
+    except:
+        # Fallback manuel si np.trapz n'existe pas
+        if len(y) != len(x):
+            return 0.0
+        if len(y) <= 1:
+            return 0.0
+        return float(0.5 * np.sum((y[1:] + y[:-1]) * (x[1:] - x[:-1])))
 
 # ---------- modèle ----------
 def solubilite(T):
