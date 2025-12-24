@@ -1,7 +1,14 @@
 # cristallisation.py
 import numpy as np
 
+# ---------- helpers robustes ----------
+def trapz_compat(y, x):
+    """
+    Compat numpy: utilise np.trapz (numpy 1.x) sans dépendre de np.trapezoid (pas dispo sur anciennes versions).
+    """
+    return np.trapz(y, x)
 
+# ---------- modèle ----------
 def solubilite(T):
     # T en °C, retourne C* en g/100g solution
     return 64.18 + 0.1337 * T + 5.52e-3 * T**2 - 9.73e-6 * T**3
@@ -27,12 +34,13 @@ def croissance(S, T):
 
 
 def moments(L, n):
-    # Remplacer np.trapz par np.trapezoid
-    m0 = np.trapezoid(n, L)
-    m1 = np.trapezoid(L * n, L)
-    m2 = np.trapezoid(L * L * n, L)
+    m0 = trapz_compat(n, L)
+    m1 = trapz_compat(L * n, L)
+    m2 = trapz_compat((L**2) * n, L)
+
     if m0 <= 0:
         return 0.0, 0.0
+
     Lmean = m1 / m0
     var = max(m2 / m0 - Lmean**2, 0.0)
     CV = np.sqrt(var) / Lmean if Lmean > 0 else 0.0
@@ -42,7 +50,7 @@ def moments(L, n):
 def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lineaire"):
     """
     Retourne : L, n(L), hist
-    hist contient toujours : t, T, S, C, Cs, Lmean, CV
+    hist contient : t, T, S, C, Cs, Lmean, CV
     """
     N = 80
     L = np.linspace(0.0, 8e-4, N)
@@ -60,8 +68,7 @@ def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lin
         Cs = solubilite(T)
         S = sursaturation(C, Cs)
 
-        # Remplacer np.trapz par np.trapezoid
-        mT = np.trapezoid((L**3) * n, L)
+        mT = trapz_compat((L**3) * n, L)
         B = nucleation(S, mT)
         G = croissance(S, T)
 
@@ -73,7 +80,7 @@ def simuler_cristallisation_batch(M, C_init, T_init, duree, dt=60.0, profil="lin
             n_new[0] = B / max(G, 1e-12)
             n = np.maximum(n_new, 0.0)
 
-        # évolution concentration (stable)
+        # évolution concentration (simple)
         C = max(C - 0.02 * S * dt / 60.0, Cs)
 
         # profils de refroidissement

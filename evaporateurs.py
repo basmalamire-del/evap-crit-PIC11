@@ -1,6 +1,7 @@
 # evaporateurs.py
 import numpy as np
 
+
 def simulation_evaporation_multi_effets(
     F_kg_h: float,
     xF: float,
@@ -86,67 +87,3 @@ def simulation_evaporation_multi_effets(
         "P": float(P),
         "details": details,
     }
-class EvaporateurMultiple:
-    """Classe wrapper pour compatibilité avec main.py et streamlit_app.py"""
-    def __init__(self, F, xF, xout, Tfeed, Psteam, n_effets):
-        self.F = float(F)
-        self.xF = float(xF)
-        self.xout = float(xout)
-        self.Tfeed = float(Tfeed)
-        self.Psteam = float(Psteam)
-        self.n_effets = int(n_effets)
-
-    def simuler(self):
-        out = simulation_evaporation_multi_effets(
-            F_kg_h=self.F,
-            xF=self.xF,
-            xout=self.xout,
-            n_effets=self.n_effets,
-            T_steam_C=self.Tfeed,
-            T_last_C=60.0
-        )
-
-        details = out.get("details", []) or []
-
-        # listes par effet
-        V_list = [d.get("V_kg_h", 0.0) for d in details] if details else None
-        A_list = [d.get("A_m2") for d in details] if details else None
-        T_list = [d.get("T_hot_C") for d in details] if details else None
-
-        # construire L (débit liquide entrant à chaque effet) et x (concentration)
-        x_list = None
-        L_list = None
-        if V_list:
-            solute_kg_h = self.F * self.xF  # masse de soluté (kg/h)
-            L_list = []
-            x_list = []
-            L_curr = float(self.F)
-            for v in V_list:
-                L_list.append(float(L_curr))
-                # concentration (fraction massique) = soluté / débit liquide
-                x_val = solute_kg_h / max(L_curr, 1e-12)
-                x_list.append(float(x_val))
-                L_curr = max(0.0, L_curr - float(v))
-
-        # garder compatibilité avec différents noms attendus
-        return {
-            "S": out.get("S"),
-            "economie": out.get("economie"),
-            "E": out.get("economie"),
-            "A_total": out.get("A_total"),
-            "A_totale": out.get("A_total"),
-            "A_tot": out.get("A_total"),
-            "A": A_list,
-            "A_effets": A_list,
-            "T": T_list,
-            "T_effets": T_list,
-            "Teb": T_list,
-            "V": V_list,
-            "V_effets": V_list,
-            "debit_vapeur": V_list,
-            "L": L_list,
-            "L_effets": L_list,
-            "x": x_list,
-            "x_effets": x_list,
-            "details": details,
-        }
