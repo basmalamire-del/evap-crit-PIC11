@@ -23,4 +23,4 @@ def sensibilite_nombre_effets(
         )
         rows.append({"Nombre_effets": n, "Debit_vapeur_S": res["S"], "Surface_totale_A": res["A_total"]})
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows) 
