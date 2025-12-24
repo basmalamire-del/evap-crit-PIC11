@@ -4,13 +4,21 @@ import numpy as np
 # ---------- helpers robustes ----------
 def trapz_compat(y, x):
     """
-    Compat numpy: utilise np.trapz (numpy 1.x) sans dépendre de np.trapezoid (pas dispo sur anciennes versions).
+    Compat numpy: essaie d'utiliser numpy.trapezoid (>=1.20),
+    sinon bascule sur numpy.trapz si disponible.
     """
-    return np.trapz(y, x)
+    # numpy récent : trapezoid
+    if hasattr(np, "trapezoid"):
+        return np.trapezoid(y, x)
+    # fallback : ancienne fonction trapz
+    if hasattr(np, "trapz"):
+        return np.trapz(y, x)
+    raise AttributeError("Aucune fonction d'intégration trapézoïdale dispo dans numpy")
 
 # ---------- modèle ----------
 def solubilite(T):
     # T en °C, retourne C* en g/100g solution
+    
     return 64.18 + 0.1337 * T + 5.52e-3 * T**2 - 9.73e-6 * T**3
 
 def sursaturation(C, Cs):
