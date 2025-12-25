@@ -30,24 +30,24 @@ tab_evap, tab_crist, tab_sens, tab_eco, tab_export = st.tabs(
 # TAB 1 — ÉVAPORATION
 # =============================
 with tab_evap:
-    st.header("Simulation de la batterie d'évaporation (CDC Section 4.1)")
+    st.header("Simulation de la batterie d'évaporation")
     
-    with st.expander("📋 Paramètres d'entrée (conformes CDC)"):
+    with st.expander("📋 Paramètres d'entrée"):
         col1, col2 = st.columns(2)
         with col1:
             F_kg_h = st.number_input("Débit F (kg/h)", min_value=1000.0, value=20000.0, step=1000.0,
-                                    help="CDC: 20,000 kg/h")
+                                    help="20,000 kg/h")
             xF = st.slider("Concentration entrée xF", min_value=0.05, max_value=0.30, value=0.15, step=0.01,
-                          help="CDC: 15% massique")
+                          help="15% massique")
             xout = st.slider("Concentration sortie xout", min_value=0.40, max_value=0.80, value=0.65, step=0.01,
-                           help="CDC: 65% massique")
+                           help="65% massique")
         with col2:
             n_effets = st.slider("Nombre d'effets", min_value=1, max_value=5, value=3, step=1,
-                                help="CDC: triple effet (3)")
+                                help="triple effet (3)")
             P_steam = st.slider("Pression vapeur (bar)", min_value=2.0, max_value=5.0, value=3.5, step=0.1,
-                               help="CDC: 3.5 bar")
+                               help="3.5 bar")
             T_feed = st.number_input("Température alimentation (°C)", min_value=70.0, max_value=95.0, value=85.0, step=1.0,
-                                    help="CDC: 85°C")
+                                    help="85°C")
     
     if st.button("▶ Lancer simulation évaporation", type="primary"):
         with st.spinner("Calcul en cours..."):
@@ -124,27 +124,27 @@ with tab_evap:
 # TAB 2 — CRISTALLISATION (VERSION FINALE)
 # =============================
 with tab_crist:
-    st.header("Simulation de cristallisation batch (CDC Section 4.2)")
+    st.header("Simulation de cristallisation batch")
     
-    with st.expander("📋 Paramètres (conformes CDC)"):
+    with st.expander("📋 Paramètres"):
         col1, col2, col3 = st.columns(3)
         with col1:
             M_batch = st.number_input("Masse batch (kg)", min_value=100.0, value=5000.0, step=500.0,
-                                     help="CDC: 5000 kg/batch")
+                                     help="5000 kg/batch")
             C_init = st.number_input("C_init (g/100g)", min_value=50.0, value=65.0, step=1.0,
-                                    help="CDC: concentration sortie évaporateurs")
+                                    help="concentration sortie évaporateurs")
         with col2:
             T_init = st.number_input("T_init (°C)", min_value=60.0, value=70.0, step=1.0,
-                                    help="CDC: 70°C initial")
+                                    help="70°C initial")
             duree_h = st.number_input("Durée (heures)", min_value=1.0, value=4.0, step=0.5,
-                                     help="CDC: 4 heures")
+                                     help="4 heures")
             dt_sim = st.selectbox("Pas de temps (s)", [300, 600], index=0,
                                  help="300s recommandé")
         with col3:
             profil = st.selectbox("Profil refroidissement", 
                                  ["lineaire", "expo", "S_const"],
                                  index=0,
-                                 help="CDC Section 4.2.2: 3 profils à comparer")
+                                 help="3 profils à comparer")
     
     col1, col2 = st.columns(2)
     
@@ -512,10 +512,10 @@ with tab_crist:
 # TAB 3 — SENSIBILITÉ
 # =============================
 with tab_sens:
-    st.header("Analyse de sensibilité (CDC Section 4.1.3)")
+    st.header("Analyse de sensibilité")
     
     st.info("""
-    **Objectif CDC :** Analyser l'impact de différents paramètres sur :
+    ** Analyser l'impact de différents paramètres sur :
     - La consommation de vapeur
     - Les surfaces d'échange
     - Les températures par effet
@@ -565,9 +565,9 @@ with tab_sens:
 # TAB 4 — ANALYSE ÉCONOMIQUE
 # =============================
 with tab_eco:
-    st.header("Analyse technico-économique (CDC Section 4.3.2)")
+    st.header("Analyse technico-économique")
     
-    with st.expander("📋 Coûts d'investissement (formules CDC)"):
+    with st.expander("📋 Coûts d'investissement (formules de calcul)"):
         st.latex(r"C_{evap} = 15000 \times A^{0.65} \, (\text{€})")
         st.latex(r"C_{crist} = 25000 \times V^{0.6} \, (\text{€})")
         st.latex(r"C_{ech} = 8000 \times A^{0.7} \, (\text{€})")
