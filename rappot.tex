@@ -1,0 +1,365 @@
+\documentclass[12pt,a4paper]{report}
+
+% =======================
+% Encodage & Langue
+% =======================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+
+% =======================
+% Mise en page
+% =======================
+\usepackage[a4paper,margin=2.5cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+
+% =======================
+% Packages utiles
+% =======================
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+
+% =======================
+% Hyperref
+% =======================
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+% =======================
+% Code listing style
+% =======================
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal}
+}
+
+\begin{document}
+
+% =======================
+% PAGE DE GARDE
+% =======================
+\begin{titlepage}
+  \centering
+
+  % Logo éventuel
+  %\includegraphics[width=3cm]{logo_fst.png}\\[0.5cm]
+
+  {\Large \textbf{Université Hassan 1\textsuperscript{er}}}\\[0.2cm]
+  {\Large \textbf{Faculté des Sciences et Techniques de Settat}}\\[0.8cm]
+
+  \rule{\textwidth}{0.4pt}\\[0.4cm]
+  {\large \textbf{Filière : Procédés et Ingénierie Chimique (PIC)}}\\[0.2cm]
+  {\large \textbf{Module : Évaporation et Cristallisation}}\\[0.4cm]
+  \rule{\textwidth}{0.4pt}\\[2cm]
+
+  {\Large \textbf{Rapport de Projet}}\\[0.8cm]
+
+  {\huge \textbf{Évaporation multiple \&\\[0.2cm]
+  Cristallisation du saccharose}}\\[2cm]
+
+  \begin{flushleft}
+    \textbf{Réalisé par :}\\
+    - LAMIRE Basma\\
+    - RAHIB Wissal
+    - SALAMI Nezha\\[0.8cm]
+
+    \textbf{Encadrant :} Pr. BAKHER\\[0.3cm]
+    \textbf{Année universitaire :} 2025--2026
+  \end{flushleft}
+
+  \vfill
+  Settat, \today
+
+\end{titlepage}
+
+\newpage
+\tableofcontents   % Table des matières
+
+\clearpage
+
+%====================================================
+\section*{Introduction générale}
+\addcontentsline{toc}{section}{Introduction générale}
+
+La cristallisation par évaporation est une opération unitaire largement utilisée dans les procédés agroalimentaires, chimiques et pharmaceutiques pour obtenir un produit solide de haute pureté à partir d’une solution concentrée. Elle repose sur le contrôle fin de la température, de la concentration et de la sursaturation afin de maîtriser la taille et la qualité des cristaux.
+
+Dans ce projet, l’équipe a développé une application scientifique permettant de simuler une cristallisation batch de saccharose, d’analyser la distribution de taille des cristaux et de déployer cette simulation sous forme d’application web. Le travail porte autant sur la \textbf{modélisation physique} que sur les aspects \textbf{développement logiciel, collaboration Git et automatisation du déploiement}.
+
+Les objectifs principaux sont :
+\begin{itemize}
+    \item modéliser la solubilité, la sursaturation, la nucléation et la croissance cristalline ;
+    \item étudier l’évolution de la taille moyenne des cristaux, du coefficient de variation (CV) et du rendement massique ;
+    \item structurer un code modulaire et reproductible ;
+    \item automatiser la chaîne VS~Code $\rightarrow$ GitHub $\rightarrow$ Docker / Streamlit Cloud.
+\end{itemize}
+
+%====================================================
+\section{Structure du projet}
+
+La structure finale du dépôt est la suivante :
+
+\begin{verbatim}
+EVAP-CRISTALLO/
+│
+├── .devcontainer/           (environnement VS Code)
+├── .github/workflows/       (workflows CI/CD)
+│
+├── Dockerfile               (image de déploiement)
+├── requirements.txt         (dépendances Python)
+├── README.md
+│
+├── main.py                  (script principal)
+├── gui.py                   (interface locale Tkinter)
+├── streamlit_app.py         (interface web Streamlit)
+│
+├── cristallisation.py       (modèle de cristallisation)
+├── evaporateurs.py          (modèle d'évaporation)
+├── thermodynamique.py       (relations thermo simplifiées)
+├── optimisation.py          (études paramétriques)
+├── sensibilite.py           (analyses de sensibilité)
+├── graphiques.py            (génération de figures)
+\end{verbatim}
+
+Cette organisation sépare clairement :
+\begin{itemize}
+    \item les modèles physiques (évaporation, cristallisation, thermodynamique) ;
+    \item les outils d’analyse (optimisation, sensibilité, graphiques) ;
+    \item les interfaces utilisateur (GUI locale et application Streamlit) ;
+    \item les fichiers liés à l’automatisation et au déploiement (Docker, GitHub~Actions).
+\end{itemize}
+
+%====================================================
+\section{Modélisation physique}
+
+\subsection*{Cristallisation (cristallisation.py)}
+\addcontentsline{toc}{subsection}{Cristallisation (cristallisation.py)}
+
+Le module \texttt{cristallisation.py} implémente le cœur scientifique du projet :
+\begin{itemize}
+    \item loi de solubilité du saccharose en fonction de la température ;
+    \item calcul de la sursaturation relative $S$ ;
+    \item cinétiques de nucléation et de croissance (lois de puissance) ;
+    \item résolution simplifiée d’un bilan de population en taille (PBE 1D) ;
+    \item calcul des moments : taille moyenne $L_{\text{moy}}$ et coefficient de variation (CV).
+\end{itemize}
+
+\subsection*{Évaporation (evaporateurs.py)}
+\addcontentsline{toc}{subsection}{Évaporation (evaporateurs.py)}
+
+Le module \texttt{evaporateurs.py} modélise une batterie d’évaporation à multiples effets de manière pédagogique. Il fournit, pour un nombre d’effets donné, les débits évaporés, les profils de température et les surfaces d’échange totales, qui conditionnent la concentration en sortie et donc la sursaturation disponible pour la cristallisation.
+
+\subsection*{Thermodynamique et outils d’analyse}
+
+Le module \texttt{thermodynamique.py} regroupe des relations simplifiées (température de saturation, chaleur latente, différence de température moyenne logarithmique). Les fichiers \texttt{optimisation.py}, \texttt{sensibilite.py} et \texttt{graphiques.py} permettent respectivement :
+\begin{itemize}
+    \item d’étudier l’influence de paramètres opératoires ;
+    \item de réaliser des analyses de sensibilité ;
+    \item de générer automatiquement des figures (profils temporels, distributions de taille, comparaisons de scénarios).
+\end{itemize}
+
+\section{Interface, technologies et IA utilisées}
+
+\subsection*{Interface utilisateur}
+
+L’interface principale est développée avec Streamlit :
+\begin{itemize}
+    \item réglage des paramètres (masse de batch, concentration initiale, durée, profil de refroidissement) ;
+    \item lancement des calculs ;
+    \item affichage en temps réel des courbes et métriques (taille moyenne finale en $\mu$m, CV final, rendement de cristallisation).
+\end{itemize}
+
+Une interface Tkinter simple (\texttt{gui.py}) a été utilisée au début pour tester rapidement les modèles.
+
+\subsection*{Technologies logicielles}
+
+Les principales technologies sont :
+\begin{itemize}
+    \item Python (NumPy, Pandas, Matplotlib, Altair, Streamlit) ;
+    \item Git et GitHub pour le versionnement et le travail collaboratif ;
+    \item Docker pour la conteneurisation et la portabilité ;
+    \item GitHub Actions pour l’intégration continue et le déploiement automatisé.
+\end{itemize}
+
+\subsection*{Outils d’intelligence artificielle}
+
+Plusieurs assistants IA ont été utilisés pour :
+\begin{itemize}
+    \item proposer des structures de code et des corrections d’erreurs ;
+    \item suggérer des idées d’amélioration du modèle.
+\end{itemize}
+
+Parmi les outils utilisés, on peut citer notamment \textbf{ChatGPT}, \textbf{Claude}, \textbf{DeepSeek}, \textbf{Perplexity} et d’autres interfaces intégrées dans VS~Code. Leur aide a été précieuse, tout en nécessitant une validation systématique par le groupe.
+
+%====================================================
+\section{Interface et technologies utilisées}
+
+\subsection*{Interface utilisateur}
+
+Deux interfaces ont été développées :
+\begin{itemize}
+    \item \textbf{gui.py} : une interface locale minimaliste en Tkinter pour les premiers tests ;
+    \item \textbf{streamlit\_app.py} : l’interface web principale construite avec Streamlit. L’utilisateur peut :
+    \begin{itemize}
+        \item régler les paramètres (masse de batch, concentration initiale, durée, profil de refroidissement) ;
+        \item lancer la simulation batch ;
+        \item visualiser en temps réel les courbes $T(t)$, $S(t)$, $L_{\text{moy}}(t)$, CV$(t)$ et la distribution finale $n(L)$ ;
+        \item consulter des indicateurs synthétiques (taille moyenne finale, CV final, rendement de cristallisation).
+    \end{itemize}
+\end{itemize}
+
+\subsection*{Technologies principales}
+
+Les technologies et bibliothèques utilisées sont :
+\begin{itemize}
+    \item \textbf{Python} pour l’ensemble des calculs et de la logique ;
+    \item \textbf{NumPy}, \textbf{Pandas} pour le calcul scientifique et la manipulation de données ;
+    \item \textbf{Matplotlib} et \textbf{Altair} pour les visualisations ;
+    \item \textbf{Streamlit} pour l’interface web ;
+    \item \textbf{Git} et \textbf{GitHub} pour le travail collaboratif et le versionnement ;
+    \item \textbf{Docker} pour la conteneurisation et la reproductibilité de l’environnement ;
+    \item \textbf{GitHub Actions} pour l’automatisation (CI/CD).
+\end{itemize}
+
+
+%====================================================
+\section{Collaboration Git et récupération des modifications}
+
+Dans le cadre du travail en équipe, le dépôt GitHub partagé a été utilisé comme référence unique. Chaque membre du groupe a suivi la même procédure générale.
+
+\subsection*{Récupérer les dernières modifications}
+
+Avant de commencer à travailler, chaque personne met à jour sa copie locale avec les derniers changements :
+
+\begin{verbatim}
+# Vérifier que l'on se trouve sur la branche main
+git checkout main
+
+# Récupérer les modifications du dépôt distant
+git pull origin main
+\end{verbatim}
+
+Cette étape permet d’éviter les conflits en travaillant toujours sur la version la plus récente du code.
+
+\subsection*{Envoyer ses propres modifications}
+
+Après avoir modifié le code et testé localement :
+
+\begin{verbatim}
+# Vérifier les fichiers modifiés
+git status
+
+# Ajouter les fichiers à valider
+git add streamlit_app.py cristallisation.py ...
+
+# Créer un commit avec un message explicite
+git commit -m "Ajout du calcul de rendement et de la taille moyenne finale"
+
+# Envoyer sur GitHub
+git push origin main
+\end{verbatim}
+
+En cas de conflit ou de divergence d’historique, l’équipe a convenu d’utiliser, avec précaution, un \verb|git push --force origin main| après discussion, afin d’éviter d’écraser le travail d’un autre membre.
+
+%====================================================
+\section{Automatisation, Docker et déploiement}
+
+\subsection*{Fichier requirements.txt}
+
+Le fichier \texttt{requirements.txt} liste les bibliothèques nécessaires. L’installation dans un nouvel environnement se fait par :
+
+\begin{verbatim}
+python -m venv venv
+source venv/bin/activate        # sous Linux/Mac
+venv\Scripts\activate           # sous Windows
+
+pip install -r requirements.txt
+\end{verbatim}
+
+\subsection*{Dockerisation}
+
+Le \texttt{Dockerfile} définit une image Docker capable de lancer directement l’application Streamlit :
+
+\begin{itemize}
+    \item base \texttt{python:3.x-slim} ;
+    \item copie du projet ;
+    \item installation des dépendances ;
+    \item exécution de \verb|streamlit run streamlit_app.py|.
+\end{itemize}
+
+La construction et l’exécution de l’image se font par :
+
+\begin{verbatim}
+# Construction de l'image
+docker build -t evap-cristallo .
+
+# Lancement en local
+docker run -p 8501:8501 evap-cristallo
+\end{verbatim}
+
+\subsection*{Automatisation GitHub (CI/CD)}
+
+Un workflow GitHub Actions est déclenché à chaque \verb|git push| sur la branche principale. Il exécute automatiquement :
+
+\begin{enumerate}
+    \item la création d’un environnement Python ;
+    \item l’installation des dépendances ;
+    \item des tests basiques d’import et de lancement ;
+    \item la reconstruction de l’image Docker ou le redéploiement sur la plateforme de hosting ciblée (par exemple Streamlit Cloud).
+\end{enumerate}
+
+Ainsi, la chaîne complète VS~Code $\rightarrow$ GitHub $\rightarrow$ Déploiement est automatisée.
+
+%====================================================
+\section{Résultats obtenus}
+
+Cette section est réservée à la présentation et à l’analyse des résultats numériques et graphiques de la simulation. Elle pourra inclure, par exemple :
+\begin{itemize}
+    \item les profils de température, de sursaturation et de concentration ;
+    \item l’évolution de la taille moyenne des cristaux et du CV ;
+    \item la comparaison des profils de refroidissement (linéaire, exponentiel, sursaturation constante) ;
+    \item les indicateurs finaux : taille moyenne ($\approx 450~\mu$m visée), CV, rendement massique.
+\end{itemize}
+
+Des figures générées par \texttt{streamlit\_app.py} et \texttt{graphiques.py} pourront être intégrées ici.
+
+
+\section{Difficultés rencontrées }
+Au-delà des résultats numériques, le projet a surtout été une expérience d’apprentissage complète sur l’intégration de plusieurs compétences : modélisation de procédés, développement d’interface, gestion de versions, déploiement et utilisation d’outils d’IA.
+
+Plusieurs difficultés ont marqué le travail :
+\begin{itemize}
+    \item \textbf{Collaboration GitHub} : au début, l’équipe a perdu beaucoup de temps à comprendre comment travailler à plusieurs sur le même dépôt. Les commandes de récupération (\verb|git pull|) étaient utilisées, mais la gestion des conflits et des fusions n’était pas maîtrisée. Avec la pratique, la discipline ``\emph{pull avant de coder, commit clair, push après test}'' a simplifié la collaboration.
+    \item \textbf{Résultats physiques surprenants} : les premières simulations donnaient un rendement de cristallisation très faible (environ~$0{,}4\,\%$) et des tailles moyennes presque nulles. Cela a obligé à revenir sur les hypothèses du modèle et à ajuster les paramètres cinétiques pour obtenir des ordres de grandeur plus réalistes.
+    \item \textbf{Limites des assistants IA} : les outils d’IA ont parfois des limites de contexte ou de durée de conversation. Il a donc été nécessaire de relancer de nouvelles sessions, de réexpliquer le projet et de recoller les morceaux de code. Cela a montré l’intérêt de garder une bonne documentation interne et de ne pas dépendre uniquement d’une seule IA.
+\end{itemize}
+
+%====================================================
+\section{Conclusion et perspectives}
+
+Le projet a permis de combiner \textbf{modélisation de procédés}, \textbf{développement logiciel} et \textbf{pratiques DevOps}. Une maquette fonctionnelle d’un procédé intégré évaporation–cristallisation a été obtenue, avec une interface web interactive et un déploiement automatisé.
+
+Plusieurs pistes d’amélioration peuvent être envisagées :
+\begin{itemize}
+    \item affiner les lois cinétiques de nucléation et de croissance à partir de données expérimentales ;
+    \item intégrer explicitement les spécifications industrielles (taille moyenne 450~$\mu$m, CV $<30\,\%$, pureté $>99{,}5\,\%$) dans une étape de calibration du modèle ;
+    \item coupler le simulateur avec des bibliothèques thermodynamiques avancées (CoolProp, \texttt{thermo}) pour un calcul plus rigoureux des propriétés ;
+    \item étendre l’interface à d’autres produits cristallisables et à d’autres schémas procédés.
+\end{itemize}
+
+\end{document}
