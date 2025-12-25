@@ -6,8 +6,7 @@ Application pédagogique développée dans le cadre du module **Évaporation et 
 
 Une version en ligne de l’application est disponible :
 
-🔗 [https://evap-crit-pic11-fzcm6e9ypj2gqtvuprqjpv.streamlit.app](https://evap-crit-pic11-fzcm6e9ypj2gqtvuprqjpv.streamlit.app)
-
+https://evap-crit-pic11-v6hyd7a2cyovj45r7qh66x.streamlit.app/
 ## Installation rapide
 
 Prérequis :
@@ -19,8 +18,8 @@ https://github.com/rahibbwissale-bit/evap-crit-PIC11.git
 
 ## Exécution locale
 Installer les dépendances : 
-pip install -r requirements.txt
-streamlit run streamlit_app.py
+- pip install -r requirements.txt
+- streamlit run streamlit_app.py
 
 ## À propos
 
