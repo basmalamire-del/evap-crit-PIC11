@@ -1,4 +1,4 @@
-# streamlit_app.py
+# streamlit_app.py - VERSION CORRIGÉE
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -118,7 +118,8 @@ with tab_evap:
             
             # Tableau détaillé
             st.subheader("📋 Résultats détaillés par effet")
-            st.dataframe(details, use_container_width=True)
+            st.dataframe(details, width='stretch')  # CORRIGÉ ICI
+
 # =============================
 # TAB 2 — CRISTALLISATION (VERSION FINALE)
 # =============================
@@ -169,17 +170,14 @@ with tab_crist:
                     duree_s = int(duree_h * 3600)
                     resultats = comparer_profils(M_batch, C_init, T_init, duree_s)
                     st.session_state.crist_compare = resultats
-                    st.session_state.show_comparison = True  # NOUVEAU: Flag pour afficher
+                    st.session_state.show_comparison = True
                     st.success("✅ Comparaison terminée !")
-                    
-                    # Afficher IMMÉDIATEMENT le tableau
-                    st.rerun()  # NOUVEAU: Force le rechargement pour afficher
-                    
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ Erreur : {e}")
                     st.info("Assurez-vous d'avoir la bonne version de cristallisation.py")
     
-    # ========== AFFICHAGE COMPARAISON (TOUJOURS VISIBLE SI DISPONIBLE) ==========
+    # ========== AFFICHAGE COMPARAISON ==========
     if 'crist_compare' in st.session_state and st.session_state.crist_compare:
         st.subheader("🧪 Comparaison des 3 profils de refroidissement")
         
@@ -208,7 +206,7 @@ with tab_crist:
         # Afficher le tableau
         if compare_data:
             compare_df = pd.DataFrame(compare_data)
-            st.dataframe(compare_df, use_container_width=True)
+            st.dataframe(compare_df, width='stretch')  # CORRIGÉ ICI
             
             # Graphique comparatif
             st.subheader("📊 Visualisation comparative")
@@ -274,6 +272,7 @@ with tab_crist:
             
             st.success(f"**Profil recommandé :** {meilleur_profil}")
             st.info(f"**Raison :** Meilleur compromis taille moyenne ({scores[0][2]:.1f} μm) et uniformité (CV={scores[0][3]:.1f}%)")
+
     # AFFICHAGE RÉSULTATS SIMPLE
     if st.session_state.crist_res:
         res = st.session_state.crist_res
@@ -294,7 +293,6 @@ with tab_crist:
         
         # Assurer des valeurs réalistes
         if Lmean_final < 400 or Lmean_final > 500:
-            # Ajuster à une valeur réaliste
             if Lmean_final < 400:
                 Lmean_final = 425.0
             else:
@@ -436,7 +434,7 @@ with tab_crist:
             })
         
         compare_df = pd.DataFrame(compare_data)
-        st.dataframe(compare_df, use_container_width=True)
+        st.dataframe(compare_df, width='stretch')  # CORRIGÉ ICI
         
         # Graphique comparatif
         st.subheader("📊 Visualisation comparative")
@@ -539,7 +537,7 @@ with tab_sens:
                            "📊 Débit", "📊 Température", "📊 Nombre d'effets"])
         
         with tabs_sens[0]:
-            st.dataframe(analyses["pression_vapeur"], use_container_width=True)
+            st.dataframe(analyses["pression_vapeur"], width='stretch')  # CORRIGÉ ICI
             # Graphique
             fig, ax = plt.subplots(figsize=(10, 5))
             df = analyses["pression_vapeur"]
@@ -552,16 +550,16 @@ with tab_sens:
             st.pyplot(fig)
         
         with tabs_sens[1]:
-            st.dataframe(analyses["concentration_finale"], use_container_width=True)
+            st.dataframe(analyses["concentration_finale"], width='stretch')  # CORRIGÉ ICI
         
         with tabs_sens[2]:
-            st.dataframe(analyses["debit_alimentation"], use_container_width=True)
+            st.dataframe(analyses["debit_alimentation"], width='stretch')  # CORRIGÉ ICI
         
         with tabs_sens[3]:
-            st.dataframe(analyses["temperature_alimentation"], use_container_width=True)
+            st.dataframe(analyses["temperature_alimentation"], width='stretch')  # CORRIGÉ ICI
         
         with tabs_sens[4]:
-            st.dataframe(analyses["nombre_effets"], use_container_width=True)
+            st.dataframe(analyses["nombre_effets"], width='stretch')  # CORRIGÉ ICI
 
 # =============================
 # TAB 4 — ANALYSE ÉCONOMIQUE
@@ -647,6 +645,7 @@ with tab_eco:
                 
         else:
             st.warning("Veuillez d'abord exécuter une simulation d'évaporation")
+
 # =============================
 # TAB 5 — EXPORT
 # =============================
@@ -666,7 +665,7 @@ with tab_export:
                 data=csv,
                 file_name="evaporation_detailed.csv",
                 mime="text/csv",
-                use_container_width=True
+                 width='stretch'  # Ici il faut aussi corriger
             )
     
     with col2:
@@ -678,7 +677,7 @@ with tab_export:
                 data=csv,
                 file_name="cristallisation_history.csv",
                 mime="text/csv",
-                use_container_width=True
+                 width='stretch'  # Ici il faut aussi corriger
             )
     
     with col3:
@@ -692,7 +691,7 @@ with tab_export:
                     data=csv,
                     file_name="sensibilite_effets.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width='stretch' # Ici il faut aussi corriger
                 )
     
     # Code pour génération rapport
